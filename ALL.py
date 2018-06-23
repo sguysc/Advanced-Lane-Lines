@@ -32,7 +32,6 @@ class LaneDetector:
     right = deque()
     left_fitx = []
     right_fitx = []
-    Mpersp = []
     left_curverad = 0
     right_curverad = 0
 
@@ -66,38 +65,39 @@ class LaneDetector:
         cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1], None, None)
     
     def mask_car_and_sky(self, img, roi_corners):
-#        shape = img.shape
-#        vertices = np.array([[(0,0),(shape[1],0),(shape[1],0),(6*shape[1]/7,shape[0]),
-#                      (shape[1]/7,shape[0]), (0,0)]],dtype=np.int32)
-#
-#        mask = np.zeros_like(img)   
-#    
-#        #defining a 3 channel or 1 channel color to fill the mask with depending on the input image
-#        if len(img.shape) > 2:
-#            channel_count = img.shape[2]  # i.e. 3 or 4 depending on your image
-#            ignore_mask_color = (255,) * channel_count
-#        else:
-#            ignore_mask_color = 255
-#            
-#        #filling pixels inside the polygon defined by "vertices" with the fill color    
-#        cv2.fillPoly(mask, vertices, ignore_mask_color)
-#        
-#        #returning the image only where mask pixels are nonzero
-#        masked_image = cv2.bitwise_and(img, mask)
-#        return masked_image
-        res=img.copy()
-        #remove hood
-        res[-int(res.shape[0]*0.1):-1,:,:]=0
-        #remove sky
-        res[0:int(roi_corners[1][1]),:,:]=0
-        return res
+        img = img.copy()
+        shape = img.shape
+        vertices = np.array([[(0,0),(shape[1],0),(shape[1],0),(6*shape[1]/7,shape[0]),
+                      (shape[1]/7,shape[0]), (0,0)]],dtype=np.int32)
+
+        mask = np.zeros_like(img)   
     
-    def warp(self, undist, roi_corners):
+        #defining a 3 channel or 1 channel color to fill the mask with depending on the input image
+        if len(img.shape) > 2:
+            channel_count = img.shape[2]  # i.e. 3 or 4 depending on your image
+            ignore_mask_color = (255,) * channel_count
+        else:
+            ignore_mask_color = 255
+            
+        #filling pixels inside the polygon defined by "vertices" with the fill color    
+        cv2.fillPoly(mask, vertices, ignore_mask_color)
+        
+        #returning the image only where mask pixels are nonzero
+        masked_image = cv2.bitwise_and(img, mask)
+        return masked_image
+#        res=img.copy()
+#        #remove hood
+#        res[-int(res.shape[0]*0.1):-1,:,:]=0
+#        #remove sky
+#        res[0:int(roi_corners[1][1]),:,:]=0
+#        return res
+    
+    def warp(self, img, roi_corners):
         new_top_left=np.array([roi_corners[0,0],0])
         new_top_right=np.array([roi_corners[3,0],0])
         offset=[150,0]
         
-        img_size = (undist.shape[1], undist.shape[0])
+        img_size = (img.shape[1], img.shape[0])
         src = np.float32([roi_corners[0],roi_corners[1],roi_corners[2],roi_corners[3]])
         dst = np.float32([roi_corners[0]+offset,new_top_left+offset,new_top_right-offset ,roi_corners[3]-offset])    
         self.Mpersp = cv2.getPerspectiveTransform(src, dst)
@@ -117,7 +117,7 @@ class LaneDetector:
 #        warped_img = cv2.warpPerspective(undist, self.Mpersp, dsize=warped_size)
 #        return warped_img
     
-    def mask_lane_lines(self, img, s_thresh=(120, 255), sx_thresh=(20, 255),l_thresh=(40,255)):
+    def mask_lane_lines(self, img, s_thresh=(120, 255), sx_thresh=(50, 255),l_thresh=(40,255)):
         img = np.copy(img)
     
         # Convert to HLS color space and separate the V channel
@@ -144,7 +144,7 @@ class LaneDetector:
         l_binary = np.zeros_like(l_channel)
         l_binary[(l_channel >= l_thresh[0]) & (l_channel <= l_thresh[1])] = 1
         
-        channels = 255*np.dstack(( l_binary, sxbinary, s_binary)).astype('uint8')        
+#        channels = 255*np.dstack(( l_binary, sxbinary, s_binary)).astype('uint8')        
         binary = np.zeros_like(sxbinary)
         binary[((l_binary == 1) & (s_binary == 1) | (sxbinary==1))] = 1
 #        binary = 255*np.dstack((binary,binary,binary)).astype('uint8')            
@@ -296,7 +296,7 @@ class LaneDetector:
         unwarped=np.dstack((np.zeros_like(unwarped),np.zeros_like(unwarped),unwarped))
     
         line_image = cv2.addWeighted(result, 1, unwarped, 1, 0)
-        return result,line_image
+        return result, line_image
     
     def computeAndShow(self, img, warped):
             # Define y-value where we want radius of curvature
@@ -331,60 +331,61 @@ class LaneDetector:
         # initialize for each picture
         self.left.clear()
         self.right.clear()
+#        roi_corners = np.float32([[190, 720], [589,457], [698, 457], [1145, 720]])
+        roi_corners = np.float32([[180, 720], [579,457], [708, 457], [1155, 720]])
+#        roi_corners = np.float32([[160, 719], [590,440], [740, 440], [1170, 719]])
         
         #undistort after calibration
         undist = cv2.undistort(img, self.mtx, self.dist, None, self.mtx)
         
-#        roi_corners=[[0.16*undist.shape[1],undist.shape[0]],
-#                     [0.45*undist.shape[1],0.63*undist.shape[0]],
-#                     [0.55*undist.shape[1],0.63*undist.shape[0]],
-#                     [0.84*undist.shape[1],undist.shape[0]]]
-        roi_corners = np.float32([[160, 719], [590,440], [740, 440], [1170, 719]])
-    
         show_roi=True
         if show_roi:
+            undist2 = undist.copy()
             src = np.float32(roi_corners)
             pts = np.array(src, np.int32)
             pts = pts.reshape((-1,1,2))
-            cv2.polylines(undist,[pts],True,(0,0,255))
-            cv2.imshow('roi',undist)
+            cv2.polylines(undist2,[pts],True,(0,0,255))
+#            cv2.imshow('roi',undist2)
 #            cv2.waitKey(2250)
-    
-        #remove unwanted image data (sky, car)
-        undist_masked = self.mask_car_and_sky(undist, roi_corners)
-        show_mask=True
-        if show_mask:
-            cv2.imshow('undist_masked',undist_masked)
-#            cv2.waitKey(2250)
-    
+            
         #Save before and after undistortion one time only
         if self.save_undistoted:
-            before_after=np.concatenate((img, undist), axis=1)
+            before_after=np.concatenate((img, undist2), axis=1)
             before_after=cv2.putText(before_after,'Distorted example pic', (50,50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2, cv2.LINE_AA)
             before_after=cv2.putText(before_after,'Undistorted example pic', (50+img.shape[1],50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2, cv2.LINE_AA)
     
             cv2.imwrite('output_images\\distortion_fig.jpg',before_after)
             self.save_undistoted=False
-    
-        warped = self.warp(undist_masked, roi_corners)
-        show_warped=True
-        if show_warped:
-#            before_after=np.concatenate((undist, warped), axis=1)
-#            before_after=cv2.putText(before_after,'Undistorted example pic', (50,50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2, cv2.LINE_AA)
-#            before_after=cv2.putText(before_after,'warped example pic', (50+img.shape[1],50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2, cv2.LINE_AA)
-            cv2.imshow('warped_masked',warped)
-#            cv2.waitKey(4250)
             
-        # cv2.imshow('transformed',warped)
-        warped_mask = self.mask_lane_lines(warped)
-        show_mask_line=True
+        bw = self.mask_lane_lines(undist)
+        show_mask_line=False
         if show_mask_line:
-            before_after=np.concatenate((np.dstack((warped_mask,warped_mask,warped_mask)).astype('uint8'), warped), axis=1)
+            before_after=np.concatenate((np.dstack((bw,bw,bw)).astype('uint8'), undist), axis=1)
             before_after=cv2.putText(before_after,'warped original example pic', (50,50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2, cv2.LINE_AA)
-            before_after=cv2.putText(before_after,'warped mask example pic', (50+warped_mask.shape[1],50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2, cv2.LINE_AA)
+            before_after=cv2.putText(before_after,'warped mask example pic', (50+bw.shape[1],50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2, cv2.LINE_AA)
             cv2.imshow('mask_line', before_after) #warped_mask)
 #            cv2.waitKey(4250)
+            
+#        warped = self.mask_car_and_sky(bw, roi_corners)
+#        
+#        warped_mask = self.warp(warped, roi_corners)
         
+        warped = self.warp(bw, roi_corners)
+        show_warped=False
+        if show_warped:
+            before_after=np.concatenate((undist, warped), axis=1)
+            before_after=cv2.putText(before_after,'Undistorted example pic', (50,50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2, cv2.LINE_AA)
+            before_after=cv2.putText(before_after,'warped example pic', (50+img.shape[1],50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2, cv2.LINE_AA)
+            cv2.imshow('warped', warped)
+            cv2.waitKey(4250)
+        
+        #remove unwanted image data (sky, car)
+        warped_mask = self.mask_car_and_sky(warped, roi_corners)
+        show_mask=False
+        if show_mask:
+            cv2.imshow('warped_mask',warped_mask)
+            cv2.waitKey(4250)
+                    
         # cv2.imshow('binary',warped)
         points = self.find_line_points(warped_mask)
         # cv2.imshow('warped',warped)
@@ -395,26 +396,34 @@ class LaneDetector:
         result, line_image = self.fitAndShow(warped_mask, undist, points)
         self.computeAndShow(result, warped_mask)
     
-        return result
+        return result, undist, bw, warped, warped_mask
 
 #%%
 if __name__ == '__main__':
     laneDet = LaneDetector()
     
     laneDet.calibrate_camera('camera_cal\\*.jpg')
+#    fnames = ['test_images\\straight_lines1.jpg', 'test_images\\straight_lines2.jpg', \
+#     'test_images\\test1.jpg', 'test_images\\test2.jpg', 'test_images\\test3.jpg', \
+#     'test_images\\test4.jpg', 'test_images\\test5.jpg', 'test_images\\test6.jpg']
     
-    for fimg in glob.glob('test_images\\*.jpg'):
+    fnames = ['test_images\\test1.jpg']
+    for fimg in fnames:#glob.glob('test_images\\*.jpg'):
         fname = fimg.split('\\')[-1]
         print("processing file " + fname)
         img=cv2.imread(fimg)
         #Do processing
-        res = laneDet.process_image(img)
+        res, undist, bw, warped, warped_mask = laneDet.process_image(img)
         #Write result
-        cv2.imwrite('test_images\\p_' + fname, res)
+        cv2.imwrite('test_images\\1\\res_' + fname, res)
+        cv2.imwrite('test_images\\1\\undist_' + fname, undist)
+        cv2.imwrite('test_images\\1\\bw_' + fname, bw)
+        cv2.imwrite('test_images\\1\\warped_' + fname, warped)
+        cv2.imwrite('test_images\\1\\warped_mask_' + fname, warped_mask)
         #show results
-#        cv2.imshow('Result', res)
-        cv2.waitKey(250)
-        break
+        cv2.imshow('Result', res)
+#        cv2.waitKey(250)
+#        break
     
     
     #Process all videos
@@ -423,4 +432,23 @@ if __name__ == '__main__':
     
     print('done')
     
-    
+#%%
+#roi_corners = np.float32([[190,720],[589,457],[698,457],[1145,720]])
+##np.float32([[160, 719], [590,440], [740, 440], [1170, 719]])
+#corner_tuples=[]
+#for ind,c in enumerate(roi_corners):
+#    corner_tuples.append(tuple(roi_corners[ind]))
+#
+#cv2.line(undist, corner_tuples[0], corner_tuples[1], color=[255,0,0], thickness=1)
+#cv2.line(undist, corner_tuples[1], corner_tuples[2], color=[255,0,0], thickness=1)
+#cv2.line(undist, corner_tuples[2], corner_tuples[3], color=[255,0,0], thickness=1)
+#cv2.line(undist, corner_tuples[3], corner_tuples[0], color=[255,0,0], thickness=1)
+#warped = laneDet.warp(undist, roi_corners)
+#f, (ax1,ax2) = plt.subplots(1, 2, figsize=(24, 9))
+#f.tight_layout()
+#
+#ax1.imshow(undist)
+#ax1.set_title('Original', fontsize=40)
+#
+#ax2.imshow(warped)
+#ax2.set_title('Warped', fontsize=40)
